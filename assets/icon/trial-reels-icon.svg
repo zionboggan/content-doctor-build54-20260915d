@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Trial Reels">
+  <title>Trial Reels</title>
+  <rect width="1024" height="1024" fill="#121315"/>
+  <!-- Source artwork for trial-reels-icon.png. The 24px master, section 11.2, scaled
+       so the ink is 66% of the canvas height and centred. Not pre-rounded: iOS masks. -->
+  <g transform="translate(140.29 106.50) scale(33.7920)" shape-rendering="crispEdges">
+    <rect x="3" y="2" width="2" height="20" fill="#E8833A"/>
+    <rect x="6" y="3" width="12" height="18" fill="none" stroke="#E8E4DE" stroke-width="2"/>
+    <circle cx="14" cy="7" r="2" fill="#E8833A" shape-rendering="geometricPrecision"/>
+  </g>
+</svg>

@@ -1,0 +1,308 @@
+name: iOS - TestFlight
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FLUTTER_VERSION: '3.41.7'
+  BUNDLE_ID: com.zionsworking.matchabloom
+
+jobs:
+  visual:
+    name: Linux visual regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Flutter pub get
+        run: flutter pub get
+      - name: Visual regression
+        run: flutter test test/visual_handoff_test.dart test/review_viewport_test.dart
+
+  build:
+    needs: visual
+    name: Build IPA + upload on tags
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: CocoaPods cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: pods-${{ hashFiles('ios/Podfile.lock', 'pubspec.lock') }}
+          restore-keys: pods-
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Flutter analyze
+        run: flutter analyze lib test
+
+      - name: Privacy guard
+        run: python3 scripts/privacy_guard.py
+
+      - name: Flutter tests
+        run: flutter test $(find test -name '*_test.dart' ! -name 'visual_handoff_test.dart' ! -name 'review_viewport_test.dart')
+
+      - name: Configure private routing
+        env:
+          PRIVATE_ENDPOINT_MAP: ${{ secrets.PRIVATE_ENDPOINT_MAP }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          mapping = json.loads(os.environ['PRIVATE_ENDPOINT_MAP'])
+          for name in ('lib/main.dart', 'ios/Runner/Info.plist'):
+              path = Path(name)
+              text = path.read_text()
+              for placeholder, value in mapping.items():
+                  text = text.replace(placeholder, value)
+              path.write_text(text)
+          PY
+
+      - name: TestFlight secret preflight
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            APP_STORE_CONNECT_API_KEY_ID \
+            APP_STORE_CONNECT_API_ISSUER_ID \
+            APP_STORE_CONNECT_API_KEY_BASE64 \
+            APPLE_TEAM_ID \
+            BUILD_CERTIFICATE_BASE64 \
+            P12_PASSWORD \
+            BUILD_PROVISION_PROFILE_BASE64
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required TestFlight secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Decode App Store Connect API key
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          API_KEY_ID_RAW: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        run: |
+          umask 077
+          mkdir -p ~/.appstoreconnect/private_keys
+          KEY_ID=$(printf %s "$API_KEY_ID_RAW" | tr -cd '[:print:]')
+          KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          echo "$API_KEY_BASE64" | base64 -d > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          chmod 700 ~/.appstoreconnect ~/.appstoreconnect/private_keys
+
+      - name: Build unsigned archive
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: flutter build ios --release --no-codesign
+
+      - name: Import iOS Distribution code-signing cert
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d
+        with:
+          p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.P12_PASSWORD }}
+
+      - name: Install App Store provisioning profile
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PATH="$PROFILE_DIR/Matcha_Bloom_AppStore.mobileprovision"
+          mkdir -p "$PROFILE_DIR"
+          echo "$PROFILE_BASE64" | base64 -d > "$PROFILE_PATH"
+          chmod 600 "$PROFILE_PATH"
+          /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<<"$(/usr/bin/security cms -D -i "$PROFILE_PATH")"
+          /usr/libexec/PlistBuddy -c 'Print Name' /dev/stdin <<<"$(/usr/bin/security cms -D -i "$PROFILE_PATH")"
+
+      # The archive takes ten minutes to discover a cert/profile mismatch and
+      # reports it as a generic exit 65. This compares the two up front and
+      # says which fingerprints it saw.
+      - name: Verify the certificate matches the profile
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/Matcha_Bloom_AppStore.mobileprovision"
+          /usr/bin/security cms -D -i "$PROFILE_PATH" > /tmp/profile.plist
+
+          python3 - <<'PY' > /tmp/profile_certs.txt
+          import plistlib, subprocess
+          d = plistlib.load(open('/tmp/profile.plist', 'rb'))
+          print('profile:', d.get('Name'), '| app-id:',
+                d.get('Entitlements', {}).get('application-identifier'),
+                '| expires:', d.get('ExpirationDate'), flush=True)
+          for der in d.get('DeveloperCertificates', []):
+              out = subprocess.run(
+                  ['openssl', 'x509', '-inform', 'DER', '-noout', '-fingerprint', '-sha1'],
+                  input=der, capture_output=True).stdout.decode()
+              print(out.split('=', 1)[1].strip().replace(':', ''))
+          PY
+
+          head -1 /tmp/profile_certs.txt
+          PROFILE_FPS=$(tail -n +2 /tmp/profile_certs.txt)
+          echo "profile embeds certificate(s): $PROFILE_FPS"
+
+          KEYCHAIN_FPS=$(/usr/bin/security find-identity -v -p codesigning \
+            | awk '{print $2}' | grep -E '^[0-9A-F]{40}$' || true)
+          echo "keychain holds identity(ies): ${KEYCHAIN_FPS:-none}"
+
+          for fp in $PROFILE_FPS; do
+            if grep -qx "$fp" <<<"$KEYCHAIN_FPS"; then
+              echo "match on $fp - signing can proceed"
+              exit 0
+            fi
+          done
+          echo "::error::No identity in the keychain matches a certificate embedded in the profile."
+          echo "::error::BUILD_CERTIFICATE_BASE64 and BUILD_PROVISION_PROFILE_BASE64 are from different certificates."
+          exit 1
+
+      - name: Build signed IPA + upload to TestFlight
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          API_KEY_ID=$(printf %s "$API_KEY_ID" | tr -cd '[:print:]')
+          API_ISSUER_ID=$(printf %s "$API_ISSUER_ID" | tr -cd '[:print:]')
+          TEAM_ID=$(printf %s "$TEAM_ID" | tr -cd '[:print:]')
+          export API_KEY_ID API_ISSUER_ID TEAM_ID
+          export API_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+
+          /usr/bin/sed -i "" "s/__TEAM_ID__/${TEAM_ID}/g" ios/ExportOptions.plist
+          flutter build ios --release --no-codesign
+
+          cd ios
+          xcodebuild archive \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath build/Runner.xcarchive \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            "CODE_SIGN_IDENTITY=iPhone Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="Matcha Bloom AppStore"
+
+          xcodebuild -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/ipa
+
+          IPA_PATH=$(find build/ipa -name '*.ipa' | head -1)
+          if [ -z "$IPA_PATH" ]; then
+            echo "::error::Export produced no .ipa"
+            exit 1
+          fi
+          echo "uploading $IPA_PATH ($(stat -f%z "$IPA_PATH") bytes)"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$API_ISSUER_ID"
+
+      # altool exiting zero is not proof the build reached App Store Connect.
+      # Ask App Store Connect directly, and fail the job if the build number
+      # this run produced never shows up.
+      - name: Confirm the build reached App Store Connect
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          # The runner's python is PEP 668 externally-managed, so a bare
+          # `pip install` aborts. A venv is the portable way in.
+          python3 -m venv /tmp/ascvenv
+          /tmp/ascvenv/bin/pip install --quiet --disable-pip-version-check pyjwt cryptography
+          API_KEY_ID=$(printf %s "$API_KEY_ID" | tr -cd '[:print:]')
+          API_ISSUER_ID=$(printf %s "$API_ISSUER_ID" | tr -cd '[:print:]')
+          export API_KEY_ID API_ISSUER_ID
+          export EXPECTED_BUILD=$(grep -m1 '^version:' pubspec.yaml | sed 's/.*+//')
+
+          /tmp/ascvenv/bin/python - <<'PY'
+          import os, time, json, urllib.request, jwt
+
+          key_id = os.environ['API_KEY_ID']
+          issuer = os.environ['API_ISSUER_ID']
+          expected = os.environ['EXPECTED_BUILD'].strip()
+          app_id = '6772822116'
+          key = open(os.path.expanduser(f'~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8')).read()
+
+          def token():
+              return jwt.encode(
+                  {'iss': issuer, 'exp': int(time.time()) + 900, 'aud': 'appstoreconnect-v1'},
+                  key, algorithm='ES256', headers={'kid': key_id, 'typ': 'JWT'})
+
+          def get(path):
+              req = urllib.request.Request(
+                  'https://api.appstoreconnect.apple.com/v1/' + path,
+                  headers={'Authorization': 'Bearer ' + token()})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.load(r)
+
+          app = get(f'apps/{app_id}')['data']['attributes']
+          print('app record:', app.get('bundleId'), '|', app.get('name'), flush=True)
+          if app.get('bundleId') != 'com.zionsworking.matchabloom':
+              raise SystemExit(f"::error::App {app_id} is {app.get('bundleId')}, not the expected bundle id")
+
+          print(f'waiting for build {expected} to appear (processing can lag)...', flush=True)
+          for attempt in range(20):
+              builds = get(f'builds?filter[app]={app_id}&sort=-uploadedDate&limit=10')['data']
+              seen = [(b['attributes'].get('version'), b['attributes'].get('processingState'))
+                      for b in builds]
+              print(f'  attempt {attempt + 1}: {seen}', flush=True)
+              if any(v == expected and state == 'VALID' for v, state in seen):
+                  print(f'CONFIRMED: build {expected} is valid in App Store Connect')
+                  break
+              time.sleep(30)
+          else:
+              raise SystemExit(f'::error::build {expected} never appeared in App Store Connect')
+          PY
+

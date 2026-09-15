@@ -1,0 +1,48 @@
+# Flutter
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+ephemeral/
+.idea/
+.vscode/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Runner.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/xcuserdata/
+*.ipa
+*.xcframework
+
+# Secrets
+*.p8
+*.p12
+*.mobileprovision
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+.notes/
+
+# Local handoff / onboarding notes (Codex <-> Claude)
+SESSION_*.md
+HANDOFF_*.md
+*_HANDOFF.md
+CODEX_*.md
+CLAUDE_*.md
+START_HERE.md
+
+# Locally generated, sanitised temporary CI export. It must never become a
+# source artifact or be pushed back into the production repository.
+public-ci-export/
+
+# Agent edit backups (local only, never source artifacts)
+*.bak-*
