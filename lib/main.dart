@@ -1082,7 +1082,12 @@ class _NativeHomeState extends State<NativeHome>
     // AppLinks needs the native platform channel. In Linux widget tests
     // there is none, so guard both calls (MissingPluginException).
     try {
-      _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
+      _appLinksSub = _appLinks.uriLinkStream.listen(
+        _onOAuthReturn,
+        // Swallow async platform-channel errors (Linux widget tests have no
+        // native AppLinks implementation; the EventChannel "listen" throws).
+        onError: (_) {},
+      );
     } catch (_) {
       _appLinksSub = null;
     }
