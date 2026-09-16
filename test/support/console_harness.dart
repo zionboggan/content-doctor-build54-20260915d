@@ -332,6 +332,18 @@ Future<void> bootConsole(
         const MethodChannel('trial_reels/credentials'),
         (MethodCall call) async => call.method == 'read' ? 'test-token' : null,
       );
+  // AppLinks (OAuth deep links): mock native iOS/Android channels for Linux
+  // widget tests. getInitialLink -> null; event stream never emits.
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+        const MethodChannel(com.llfbandit.app_links/messages),
+        (MethodCall call) async => null,
+      );
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMessageHandler(
+        com.llfbandit.app_links/events,
+        (ByteData? message) async => null,
+      );
   addTearDown(
     () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
