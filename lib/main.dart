@@ -1080,19 +1080,15 @@ class _NativeHomeState extends State<NativeHome>
     );
     WidgetsBinding.instance.addObserver(this);
     // AppLinks needs the native platform channel. In Linux widget tests
-    // AppLinks needs the native platform channel, which only exists on
-    // iOS/Android. On Linux (widget tests) the EventChannel has no
-    // implementation and .listen() throws MissingPluginException
-    // asynchronously — uncatchable. So skip entirely off-device.
-    // (dart:io Platform is already imported; this app is iOS-only.)
-    if (Platform.isIOS || Platform.isAndroid) {
-      _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
-      // Cold start through the return link (the app was not running when the
-      // browser bounced back).
-      _appLinks.getInitialLink().then((Uri? uri) {
-        if (uri != null) _onOAuthReturn(uri);
-      });
-    }
+    // OAuth return deep links (contentdoctor://oauth/return).
+    // The native AppLinks plugin is mocked in widget tests (see
+    // test/support/console_harness.dart); on a real device it works fully.
+    _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
+    // Cold start through the return link (the app was not running when the
+    // browser bounced back).
+    _appLinks.getInitialLink().then((Uri? uri) {
+      if (uri != null) _onOAuthReturn(uri);
+    });
     _failures.load().then((_) {
       if (mounted && !_failures.isEmpty) setState(() {});
     });
