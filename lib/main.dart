@@ -1079,12 +1079,22 @@ class _NativeHomeState extends State<NativeHome>
       duration: const Duration(milliseconds: 900),
     );
     WidgetsBinding.instance.addObserver(this);
-    _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
+    // AppLinks needs the native platform channel. In Linux widget tests
+    // there is none, so guard both calls (MissingPluginException).
+    try {
+      _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
+    } catch (_) {
+      _appLinksSub = null;
+    }
     // Cold start through the return link (the app was not running when the
     // browser bounced back).
-    _appLinks.getInitialLink().then((Uri? uri) {
-      if (uri != null) _onOAuthReturn(uri);
-    });
+    try {
+      _appLinks.getInitialLink().then((Uri? uri) {
+        if (uri != null) _onOAuthReturn(uri);
+      }).catchError((_) {});
+    } catch (_) {
+      // No platform channel — skip cold-start link handling.
+    }
     _failures.load().then((_) {
       if (mounted && !_failures.isEmpty) setState(() {});
     });
