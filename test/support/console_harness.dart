@@ -340,9 +340,9 @@ Future<void> bootConsole(
         (MethodCall call) async => null,
       );
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMessageHandler(
-        'com.llfbandit.app_links/events',
-        (ByteData? message) async => null,
+      .setMockMethodCallHandler(
+        const MethodChannel('com.llfbandit.app_links/events'),
+        (MethodCall call) async => null,
       );
   addTearDown(
     () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
