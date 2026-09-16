@@ -50,6 +50,9 @@ Future<bool> _openInSystemBrowser(Uri uri) {
 /// Starts one native handoff. iOS/Android decide whether an installed
 /// Instagram app or the user's default browser owns the provider URL; either
 /// preserves the provider's real sign-in and registered callback.
+/// App flows return via the `contentdoctor://oauth/return` scheme the server
+/// bounces to; if the OS strands the user inside the Instagram app, the UI
+/// offers a Safari-link copy fallback.
 Future<InstagramConnectionLaunch> launchInstagramConnection(
   Uri uri, {
   InstagramUrlOpener? openExternal,

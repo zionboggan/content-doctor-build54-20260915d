@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' show MaterialApp, Scaffold;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:app_links/app_links.dart';
 import 'package:video_player/video_player.dart';
 import 'app_experience.dart';
 import 'console_shell.dart';
@@ -26,7 +27,7 @@ import 'schedule_calendar.dart';
 import 'runtime_config.dart';
 
 const String hostPrefKey = 'console.host';
-const String nativeVersion = '1.0.45 (54)';
+const String nativeVersion = '1.0.46 (55)';
 const String defaultHost = 'https://gateway.example.invalid:8445';
 // Colour, type and the console primitives come from console_shell.dart. The
 // legacy bg / panel / line / ink / muted / accent aliases stay in app_theme
@@ -188,6 +189,9 @@ class TrialApi {
     final dynamic result = await postJson('/reels/oauth/start', {
       'account': account,
       'purpose': purpose,
+      // Marks this flow as app-initiated so the OAuth callback bounces back
+      // to contentdoctor:// instead of the web connection.html page.
+      'client': 'native',
     });
     if (result is! Map ||
         result['url'] is! String ||
@@ -1034,6 +1038,17 @@ class _NativeHomeState extends State<NativeHome>
   Timer? _loadTicker;
   Timer? _runtimeConfigPoller;
   bool _oauthInFlight = false;
+  // OAuth return-path state. The app registers the `contentdoctor://` scheme
+  // (Info.plist); when Instagram finishes in the browser, the server bounces
+  // app-initiated flows back to contentdoctor://oauth/return and the link
+  // below resumes the flow instead of stranding the user in the browser.
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _appLinksSub;
+  Uri? _lastOAuthUri;
+  String? _oauthAccount;
+  String? _oauthPurpose;
+  Timer? _oauthPollTimer;
+  int _oauthPollTicks = 0;
   RuntimeConfig _runtimeConfig = RuntimeConfig.defaults();
 
   /// One-shot guard for first-run onboarding. The check runs once per launch,
@@ -1064,6 +1079,12 @@ class _NativeHomeState extends State<NativeHome>
       duration: const Duration(milliseconds: 900),
     );
     WidgetsBinding.instance.addObserver(this);
+    _appLinksSub = _appLinks.uriLinkStream.listen(_onOAuthReturn);
+    // Cold start through the return link (the app was not running when the
+    // browser bounced back).
+    _appLinks.getInitialLink().then((Uri? uri) {
+      if (uri != null) _onOAuthReturn(uri);
+    });
     _failures.load().then((_) {
       if (mounted && !_failures.isEmpty) setState(() {});
     });
@@ -1079,6 +1100,8 @@ class _NativeHomeState extends State<NativeHome>
     _loadTicker?.cancel();
     _runtimeConfigPoller?.cancel();
     _stripTimer?.cancel();
+    _oauthPollTimer?.cancel();
+    _appLinksSub?.cancel();
     _refreshBar.dispose();
     _search.dispose();
     super.dispose();
@@ -1087,9 +1110,74 @@ class _NativeHomeState extends State<NativeHome>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _oauthInFlight) {
-      _oauthInFlight = false;
-      _load();
+      _startOAuthReturnPoll();
     }
+  }
+
+  /// Handles the `contentdoctor://oauth/return` bounce from the OAuth
+  /// callback. The server only sends this for app-initiated flows; the web
+  /// flow keeps its connection.html landing page.
+  void _onOAuthReturn(Uri uri) {
+    if (uri.scheme != 'contentdoctor' ||
+        uri.host != 'oauth' ||
+        uri.path != '/return') {
+      return;
+    }
+    if (!mounted) return;
+    _oauthPollTimer?.cancel();
+    _oauthPollTimer = null;
+    final String outcome = uri.queryParameters['oauth'] ?? '';
+    setState(() {
+      _oauthInFlight = false;
+      _oauthAccount = null;
+    });
+    _load();
+    if (outcome == 'connected' || outcome == 'insights_connected') {
+      _strip('Instagram connected. Welcome back.');
+    } else {
+      final String msg = (uri.queryParameters['message'] ?? '').trim();
+      _strip(msg.isNotEmpty ? msg : 'Instagram connection did not complete.');
+    }
+  }
+
+  /// The user is back from the browser but the token exchange may still be in
+  /// flight server-side. Poll the gateway briefly instead of checking once
+  /// and giving up.
+  void _startOAuthReturnPoll() {
+    _oauthPollTimer?.cancel();
+    _oauthPollTicks = 0;
+    _strip('Waiting for Instagram…');
+    _oauthPollTimer =
+        Timer.periodic(const Duration(seconds: 3), (Timer t) async {
+      _oauthPollTicks++;
+      await _load();
+      final bool done = _oauthAccountConnected();
+      if (done || _oauthPollTicks >= 10) {
+        t.cancel();
+        _oauthPollTimer = null;
+        if (!mounted) return;
+        setState(() {
+          _oauthInFlight = false;
+          if (done) _oauthAccount = null;
+        });
+        _strip(
+            done ? 'Instagram connected.' : 'Still not connected. Try again.');
+      }
+    });
+  }
+
+  /// True when the account this OAuth flow was started for now reports a
+  /// verified capability.
+  bool _oauthAccountConnected() {
+    final String? account = _oauthAccount;
+    final TrialSnapshot? s = snapshot;
+    if (account == null || s == null) return false;
+    return s.accountStatus.any(
+      (Map<String, dynamic> i) =>
+          _text(i['account'], '') == account &&
+          (_capability(i, 'publishing') == 'verified' ||
+              _capability(i, 'insights') == 'verified'),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1605,20 +1693,36 @@ class _NativeHomeState extends State<NativeHome>
   Future<void> _connect(String account, String purpose) async {
     if (_oauthInFlight) return;
     final int sessionEpoch = _sessionEpoch;
-    setState(() => _oauthInFlight = true);
+    setState(() {
+      _oauthInFlight = true;
+      _oauthAccount = account;
+      _oauthPurpose = purpose;
+      _lastOAuthUri = null;
+    });
     try {
       final Uri uri = await TrialApi(host).startOAuth(account, purpose);
       if (!mounted || sessionEpoch != _sessionEpoch) return;
+      // Kept so the user can copy a Safari link when iOS routes the authorize
+      // URL into the Instagram app instead of the browser.
+      setState(() => _lastOAuthUri = uri);
       final InstagramConnectionLaunch result = await launchInstagramConnection(
         uri,
       );
       if (!mounted || sessionEpoch != _sessionEpoch) return;
-      if (!result.opened) setState(() => _oauthInFlight = false);
+      if (!result.opened) {
+        setState(() {
+          _oauthInFlight = false;
+          _oauthAccount = null;
+        });
+      }
       _strip(result.message);
-    } on Object {
+    } on Object catch (e) {
       if (mounted && sessionEpoch == _sessionEpoch) {
-        setState(() => _oauthInFlight = false);
-        _strip('Could not start Instagram connection. Try again.');
+        setState(() {
+          _oauthInFlight = false;
+          _oauthAccount = null;
+        });
+        _strip(failureCause(e, 'connection'));
       }
     }
   }
@@ -3122,6 +3226,44 @@ class _NativeHomeState extends State<NativeHome>
     ],
   );
 
+  /// Shown while an OAuth flow is in flight. If iOS opens the authorize URL
+  /// inside the Instagram app instead of Safari, the server bounce cannot
+  /// reach the browser -- the copied link lets the user finish in Safari.
+  Widget _oauthReturnBanner() {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: DoctorCard(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Finish connecting in Instagram, then return here.',
+                    style: Ty.body,
+                  ),
+                ),
+                if (_lastOAuthUri != null)
+                  ConButton(
+                    label: 'Copy Safari link',
+                    onPressed: () {
+                      Clipboard.setData(
+                        ClipboardData(text: _lastOAuthUri.toString()),
+                      );
+                      _strip(
+                        'Link copied. Paste it in Safari if Instagram opened its own app.',
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _accountsBody(TrialSnapshot s) {
     final List<Map<String, dynamic>> accounts = s.accountStatus;
     final int live = accounts
@@ -3141,6 +3283,7 @@ class _NativeHomeState extends State<NativeHome>
         // "Connected" on this tab is a claim about the gateway's own answer.
         // If the gateway is not answering, the tab has to say that first.
         ..._leadingSlivers(),
+        if (_oauthInFlight) _oauthReturnBanner(),
         SliverList.list(
           children: <Widget>[
             const _GroupLabel('CONNECTION'),
