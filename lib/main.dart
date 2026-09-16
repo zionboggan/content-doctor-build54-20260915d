@@ -1046,7 +1046,6 @@ class _NativeHomeState extends State<NativeHome>
   StreamSubscription<Uri>? _appLinksSub;
   Uri? _lastOAuthUri;
   String? _oauthAccount;
-  String? _oauthPurpose;
   Timer? _oauthPollTimer;
   int _oauthPollTicks = 0;
   RuntimeConfig _runtimeConfig = RuntimeConfig.defaults();
@@ -1700,7 +1699,6 @@ class _NativeHomeState extends State<NativeHome>
     setState(() {
       _oauthInFlight = true;
       _oauthAccount = account;
-      _oauthPurpose = purpose;
       _lastOAuthUri = null;
     });
     try {
