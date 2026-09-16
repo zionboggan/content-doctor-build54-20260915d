@@ -336,12 +336,12 @@ Future<void> bootConsole(
   // widget tests. getInitialLink -> null; event stream never emits.
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-        const MethodChannel(com.llfbandit.app_links/messages),
+        const MethodChannel('com.llfbandit.app_links/messages'),
         (MethodCall call) async => null,
       );
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMessageHandler(
-        com.llfbandit.app_links/events,
+        'com.llfbandit.app_links/events',
         (ByteData? message) async => null,
       );
   addTearDown(
