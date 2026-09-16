@@ -339,10 +339,14 @@ Future<void> bootConsole(
         const MethodChannel('com.llfbandit.app_links/messages'),
         (MethodCall call) async => null,
       );
+  // The events channel is an EventChannel (uriLinkStream), not a MethodChannel.
+  // Use setMockStreamHandler so .listen() doesn't throw MissingPluginException.
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(
-        const MethodChannel('com.llfbandit.app_links/events'),
-        (MethodCall call) async => null,
+      .setMockStreamHandler(
+        const EventChannel('com.llfbandit.app_links/events'),
+        MockStreamHandler.inline(
+          onListen: (Object? arguments, MockStreamHandlerEventSink events) {},
+        ),
       );
   addTearDown(
     () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
