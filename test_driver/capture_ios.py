@@ -31,8 +31,18 @@ def main():
         try:
             deadline = time.monotonic() + 90
             uri = None
+            next_system_log = time.monotonic() + 10
             while time.monotonic() < deadline:
                 contents = console.read_text(errors='replace')
+                if time.monotonic() >= next_system_log:
+                    # Some simulator versions send engine output only to unified logs.
+                    logs = subprocess.run([
+                        'xcrun', 'simctl', 'spawn', device, 'log', 'show',
+                        '--last', '2m', '--style', 'compact',
+                        '--predicate', 'process == "Runner"',
+                    ], capture_output=True, text=True, timeout=15)
+                    contents += logs.stdout
+                    next_system_log = time.monotonic() + 10
                 match = re.search(r'http://(?:127\.0\.0\.1|localhost):8711/[^\s]+', contents)
                 if match:
                     uri = match.group(0)
@@ -42,7 +52,12 @@ def main():
                 time.sleep(1)
             if uri is None:
                 # No reviewer login occurred yet; emit only a bounded native error tail.
-                print(console.read_text(errors='replace')[-5000:], flush=True)
+                print(contents[-5000:], flush=True)
+                diagnostic = Path('startup-diagnostics')
+                diagnostic.mkdir(exist_ok=True)
+                subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot',
+                                str(diagnostic / 'before-driver.png')],
+                               check=True, timeout=20)
                 raise RuntimeError('VM service startup exceeded90seconds')
             print('::add-mask::' + uri, flush=True)
             print('VM service available; running real login and screenshot capture', flush=True)

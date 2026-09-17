@@ -50,6 +50,7 @@ jobs:
               if chosen:break
           if chosen is None:raise SystemExit('No supported simulator available: '+str([d['name'] for d in devices]))
           if chosen['state']!='Booted':subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True)
+          subprocess.run(['open','-a','Simulator','--args','-CurrentDeviceUDID',chosen['udid']],check=True)
           subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True)
           subprocess.run(['xcrun','simctl','status_bar',chosen['udid'],'override','--time','9:41','--batteryState','charged','--batteryLevel','100'],check=True)
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('CAPTURE_DEVICE='+chosen['udid']+'\n')
@@ -71,6 +72,14 @@ jobs:
           path: app-store-captures/*.png
           if-no-files-found: warn
           retention-days: 7
+      - name: Upload pre-login startup diagnostic
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: startup-${{ matrix.device }}
+          path: startup-diagnostics/*.png
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Remove ephemeral capture configuration
         if: always()
         run: rm -f "$RUNNER_TEMP/review-config.json"
