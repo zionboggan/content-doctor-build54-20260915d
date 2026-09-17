@@ -3,6 +3,7 @@
 Avoids an unbounded wait in Flutter's simulator system-log discovery. Only
 navigation screenshots from the signed-in integration test are uploaded.
 """
+import json
 import os
 from pathlib import Path
 import re
@@ -72,6 +73,18 @@ def main():
                 '--no-dds', '--timeout=180', '-d', device,
             ], timeout=220)
             if result.returncode:
+                # Existing-app drive reports only the final aggregate failure.
+                # Keep the underlying Flutter assertion available, redacting
+                # private config before emitting a bounded console excerpt.
+                details = console.read_text(errors='replace')[-24000:]
+                config = json.loads((Path(os.environ['RUNNER_TEMP']) /
+                                     'review-config.json').read_text())
+                for value in config.values():
+                    if value:
+                        details = details.replace(str(value), '[REDACTED]')
+                details = re.sub(r'http://(?:127\.0\.0\.1|localhost):8711/\S+',
+                                 '[VM SERVICE]', details)
+                print(details, flush=True)
                 raise RuntimeError('Screenshot driver failed; see its masked test output')
         finally:
             process.terminate()
