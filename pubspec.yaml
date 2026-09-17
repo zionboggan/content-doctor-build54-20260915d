@@ -2,7 +2,7 @@ name: iris
 description: "Trial Reels production, review and publishing client."
 publish_to: 'none'
 
-version: 1.0.48+57
+version: 1.0.49+58
 
 environment:
   sdk: ^3.11.5
