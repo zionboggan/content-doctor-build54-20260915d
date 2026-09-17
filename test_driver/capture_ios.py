@@ -36,12 +36,16 @@ def main():
                 contents = console.read_text(errors='replace')
                 if time.monotonic() >= next_system_log:
                     # Some simulator versions send engine output only to unified logs.
-                    logs = subprocess.run([
-                        'xcrun', 'simctl', 'spawn', device, 'log', 'show',
-                        '--last', '2m', '--style', 'compact',
-                        '--predicate', 'process == "Runner"',
-                    ], capture_output=True, text=True, timeout=15)
-                    contents += logs.stdout
+                    try:
+                        logs = subprocess.run([
+                            'xcrun', 'simctl', 'spawn', device, 'log', 'show',
+                            '--last', '2m', '--style', 'compact',
+                            '--predicate', 'process == "Runner"',
+                        ], capture_output=True, text=True, timeout=15)
+                        contents += logs.stdout
+                    except subprocess.TimeoutExpired:
+                        # Diagnostics must not abort the actual launch attempt.
+                        print('Simulator log query slow; continuing console discovery', flush=True)
                     next_system_log = time.monotonic() + 10
                 match = re.search(r'http://(?:127\.0\.0\.1|localhost):8711/[^\s]+', contents)
                 if match:
@@ -76,8 +80,11 @@ def main():
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-            subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle],
-                           capture_output=True, timeout=15)
+            try:
+                subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle],
+                               capture_output=True, timeout=15)
+            except subprocess.TimeoutExpired:
+                print('Simulator termination timed out after capture', flush=True)
             console.unlink(missing_ok=True)
 
 
