@@ -29,7 +29,7 @@ import 'schedule_calendar.dart';
 import 'runtime_config.dart';
 
 const String hostPrefKey = 'console.host';
-const String nativeVersion = '1.0.47 (56)';
+const String nativeVersion = '1.0.48 (57)';
 const String defaultHost = 'https://gateway.example.invalid:8445';
 // Colour, type and the console primitives come from console_shell.dart. The
 // legacy bg / panel / line / ink / muted / accent aliases stay in app_theme
@@ -48,6 +48,12 @@ class GatewayHost {
 }
 
 const List<GatewayHost> knownHosts = <GatewayHost>[
+  GatewayHost(
+    label: 'App Review workspace',
+    url: 'https://content-doctor-review.zionboggan.com',
+    note: 'Sign in with the review account provided to Apple.',
+    secure: true,
+  ),
   GatewayHost(
     label: 'Tailnet over HTTPS',
     url: defaultHost,
@@ -1152,8 +1158,9 @@ class _NativeHomeState extends State<NativeHome>
     _oauthPollTimer?.cancel();
     _oauthPollTicks = 0;
     _strip('Waiting for Instagram…');
-    _oauthPollTimer =
-        Timer.periodic(const Duration(seconds: 3), (Timer t) async {
+    _oauthPollTimer = Timer.periodic(const Duration(seconds: 3), (
+      Timer t,
+    ) async {
       _oauthPollTicks++;
       await _load();
       final bool done = _oauthAccountConnected();
@@ -1166,7 +1173,8 @@ class _NativeHomeState extends State<NativeHome>
           if (done) _oauthAccount = null;
         });
         _strip(
-            done ? 'Instagram connected.' : 'Still not connected. Try again.');
+          done ? 'Instagram connected.' : 'Still not connected. Try again.',
+        );
       }
     });
   }
@@ -3406,10 +3414,15 @@ class _NativeHomeState extends State<NativeHome>
               onTap: () => unawaited(_openTutorial()),
             ),
             const _GroupLabel('SESSION'),
+            ConSheetRow(label: 'Choose connection', onTap: _chooseConnection),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Text(
-                'Signed in as ${_gabeScope ? 'Gabe' : 'Zion'}. Content Doctor $nativeVersion.',
+                'Signed in as ${_sessionRole == 'reviewer'
+                    ? 'App Review'
+                    : _gabeScope
+                    ? 'Gabe'
+                    : 'Zion'}. Content Doctor $nativeVersion.',
                 style: Ty.body.copyWith(color: Con.ink2),
               ),
             ),
@@ -4326,6 +4339,27 @@ class _NativeHomeState extends State<NativeHome>
     return ok == true;
   }
 
+  Future<void> _chooseConnection() async {
+    final String? selected = await showConSheet<String>(
+      context,
+      (_) => HostSheet(current: host),
+    );
+    if (!mounted || selected == null || selected == host) return;
+    // Clear the previous workspace before any new connection can paint it.
+    ++_loadGeneration;
+    _runtimeConfigPoller?.cancel();
+    setState(() {
+      _sessionEpoch++;
+      _sessionRole = null;
+      snapshot = null;
+      scope = 'all';
+      host = selected;
+    });
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(hostPrefKey, selected);
+    if (mounted) await _load();
+  }
+
   Future<void> _signInSheet() async {
     final TextEditingController username = TextEditingController();
     final TextEditingController key = TextEditingController();
@@ -4334,6 +4368,11 @@ class _NativeHomeState extends State<NativeHome>
       (BuildContext sheet) => ConSheet(
         title: 'Sign in',
         children: <Widget>[
+          ConSheetRow(
+            label: 'Choose connection',
+            detail: knownHostFor(host)?.label ?? host,
+            onTap: () => Navigator.of(sheet).pop(false),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: CupertinoTextField(
@@ -4393,6 +4432,10 @@ class _NativeHomeState extends State<NativeHome>
     final String secret = key.text;
     username.dispose();
     key.dispose();
+    if (go == false) {
+      await _chooseConnection();
+      return;
+    }
     if (go != true || secret.isEmpty) return;
     try {
       if (name.isNotEmpty) {
