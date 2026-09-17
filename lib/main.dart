@@ -12,6 +12,7 @@ import 'package:app_links/app_links.dart';
 import 'package:video_player/video_player.dart';
 import 'agency_workspace.dart';
 import 'app_experience.dart';
+import 'batch_schedule.dart';
 import 'console_shell.dart';
 import 'flyer_composer_page.dart';
 import 'generation_page.dart';
@@ -2907,6 +2908,45 @@ class _NativeHomeState extends State<NativeHome>
     );
   }
 
+  /// Approved exports with no time on them yet: exactly what a week-at-a-time
+  /// plan draws from. Anything already scheduled is excluded, because the
+  /// batch endpoint refuses a duplicate rather than moving it.
+  List<Map<String, dynamic>> _schedulableItems(TrialSnapshot s) {
+    final Set<String> queued = s.scheduleItems
+        .map((Map<String, dynamic> e) => '${e['id']}')
+        .toSet();
+    return s.catalogItems
+        .where(
+          (Map<String, dynamic> item) =>
+              item['status'] == 'ready_for_review' &&
+              !queued.contains('${item['id']}') &&
+              (scope == 'all' || item['account'] == scope),
+        )
+        .toList();
+  }
+
+  Future<void> _openBatchSchedule(TrialSnapshot s) async {
+    await Navigator.of(context).push<void>(
+      CupertinoPageRoute<void>(
+        builder: (BuildContext _) => BatchSchedulePage(
+          items: _schedulableItems(s),
+          phoenixNow: phoenixNow,
+          wallToUtc: phoenixWallToUtc,
+          onConfirm: (List<Map<String, dynamic>> entries) async {
+            // One call, one idempotency key: /reels/schedule queues TRIAL
+            // reels. It is not a posting path.
+            await TrialApi(host).postJson('/reels/schedule', <String, dynamic>{
+              'entries': entries,
+              'idempotency_key':
+                  'native-batch-${entries.first['id']}-${entries.length}-${entries.first['scheduled_at']}',
+            });
+          },
+        ),
+      ),
+    );
+    if (mounted) unawaited(_load());
+  }
+
   Widget _scheduleBody(TrialSnapshot s) {
     final List<Map<String, dynamic>> rows = _calendarDay != null
         ? _scheduleRows(s).where((entry) {
@@ -3001,6 +3041,21 @@ class _NativeHomeState extends State<NativeHome>
     }
     final List<Widget> slivers = <Widget>[
       ..._leadingSlivers(),
+      // A week's worth of reels at once. Hidden rather than disabled when
+      // there is nothing approved to plan with, so the tab does not offer a
+      // dead control.
+      if (_schedulableItems(s).isNotEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: ConButton(
+              label: 'Plan a batch',
+              kind: ConButtonKind.signalOutline,
+              leading: CupertinoIcons.calendar_badge_plus,
+              onPressed: () => unawaited(_openBatchSchedule(s)),
+            ),
+          ),
+        ),
       if (wide)
         SliverToBoxAdapter(
           child: Row(
