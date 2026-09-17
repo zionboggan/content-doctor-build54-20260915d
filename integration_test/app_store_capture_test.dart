@@ -4,6 +4,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:iris/main.dart' as app;
 import 'package:iris/console_shell.dart';
+import 'package:iris/schedule_calendar.dart';
 import 'package:iris/app_experience.dart' show tutorialSeenKey;
 
 void main() {
@@ -60,7 +61,11 @@ void main() {
       isFalse,
       reason: 'Screenshots require a signed-in workspace',
     );
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(find.text('Watch'), findsWidgets);
+    // A native screenshot reads the rendered surface, not just widget state.
+    await Future<void>.delayed(const Duration(seconds: 1));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await binding.takeScreenshot('01-review');
     // Tap only navigation. Never approve, publish, schedule or send in capture.
     final ConTabBar tabs = tester.widget<ConTabBar>(find.byType(ConTabBar));
@@ -69,14 +74,22 @@ void main() {
     );
     if (schedule < 0) throw StateError('Schedule navigation is unavailable');
     tabs.onChanged(schedule);
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(tester.widget<ConTabBar>(find.byType(ConTabBar)).index, schedule);
+    expect(find.byType(CdScheduleCalendar), findsOneWidget);
+    await Future<void>.delayed(const Duration(seconds: 1));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await binding.takeScreenshot('02-schedule');
     final int studio = tabs.labels.indexWhere(
       (String value) => value.toLowerCase() == 'studio',
     );
     if (studio < 0) throw StateError('Studio navigation is unavailable');
     tabs.onChanged(studio);
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(tester.widget<ConTabBar>(find.byType(ConTabBar)).index, studio);
+    expect(find.text('Make variations'), findsOneWidget);
+    await Future<void>.delayed(const Duration(seconds: 1));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await binding.takeScreenshot('03-studio');
   });
 }
