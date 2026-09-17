@@ -269,6 +269,12 @@ void main() {
       expect(find.byType(TutorialPage), findsNothing);
       await tapTab(tester, 'ACCOUNTS');
       await tester.scrollUntilVisible(find.text('Replay tutorial'), 200);
+      // Center the row above the persistent bottom navigation before tapping.
+      await Scrollable.ensureVisible(
+        tester.element(find.text('Replay tutorial')),
+        alignment: 0.5,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Replay tutorial'));
       await tester.pumpAndSettle();
       expect(find.byType(TutorialPage), findsOneWidget);
