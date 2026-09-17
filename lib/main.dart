@@ -3410,6 +3410,14 @@ class _NativeHomeState extends State<NativeHome>
             const Rule(),
             const _GroupLabel('HELP'),
             ConSheetRow(
+              label: 'Privacy policy',
+              onTap: () => _openHelpLink('privacy'),
+            ),
+            ConSheetRow(
+              label: 'Support and data requests',
+              onTap: () => _openHelpLink('support'),
+            ),
+            ConSheetRow(
               label: 'Replay tutorial',
               onTap: () => unawaited(_openTutorial()),
             ),
@@ -4339,6 +4347,18 @@ class _NativeHomeState extends State<NativeHome>
     return ok == true;
   }
 
+  Future<void> _openHelpLink(String page) async {
+    try {
+      final bool opened = await launchUrl(
+        Uri.parse('https://zionboggan.com/lab/content-doctor/$page/'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) _strip('Could not open the page. Try again.');
+    } catch (_) {
+      if (mounted) _strip('Could not open the page. Try again.');
+    }
+  }
+
   Future<void> _chooseConnection() async {
     final String? selected = await showConSheet<String>(
       context,
@@ -4372,6 +4392,10 @@ class _NativeHomeState extends State<NativeHome>
             label: 'Choose connection',
             detail: knownHostFor(host)?.label ?? host,
             onTap: () => Navigator.of(sheet).pop(false),
+          ),
+          ConSheetRow(
+            label: 'Privacy policy',
+            onTap: () => _openHelpLink('privacy'),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
