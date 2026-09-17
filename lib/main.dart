@@ -29,7 +29,7 @@ import 'schedule_calendar.dart';
 import 'runtime_config.dart';
 
 const String hostPrefKey = 'console.host';
-const String nativeVersion = '1.0.46 (55)';
+const String nativeVersion = '1.0.47 (56)';
 const String defaultHost = 'https://gateway.example.invalid:8445';
 // Colour, type and the console primitives come from console_shell.dart. The
 // legacy bg / panel / line / ink / muted / accent aliases stay in app_theme

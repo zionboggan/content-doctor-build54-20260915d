@@ -61,6 +61,7 @@ class _InboxPanelState extends State<InboxPanel> {
   String? failure;
   bool loading = false;
   bool saving = false;
+  String? sendingDraft;
   int request = 0;
   final TextEditingController reply = TextEditingController();
 
@@ -205,6 +206,70 @@ class _InboxPanelState extends State<InboxPanel> {
     }
   }
 
+  Future<void> _sendDraft(Map<String, dynamic> draft) async {
+    if (sendingDraft != null || status?['outbound_messaging_enabled'] != true) {
+      return;
+    }
+    final String account = widget.account;
+    final String id = _text(draft['id']);
+    final String recipient = _text(draft['conversation_id']);
+    final String text = _text(draft['text']);
+    final bool? approved = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => CupertinoAlertDialog(
+        title: const Text('Send this Instagram reply?'),
+        content: SingleChildScrollView(
+          child: Text('From $account\nTo conversation $recipient\n\n$text'),
+        ),
+        actions: <Widget>[
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Approve and send'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted ||
+        approved != true ||
+        account != widget.account ||
+        sendingDraft != null) {
+      return;
+    }
+    setState(() {
+      sendingDraft = id;
+      failure = null;
+    });
+    String? notice;
+    try {
+      final dynamic result = await widget
+          .postJson('/reels/dms/send', <String, dynamic>{
+            'account': account,
+            'draft_id': id,
+            'conversation_id': recipient,
+            'text': text,
+            'confirm': true,
+          });
+      if (result is! Map || result['state'] != 'sent') {
+        notice =
+            'No confirmed send receipt. Refresh before taking another action.';
+      }
+    } catch (_) {
+      notice =
+          'Reply not confirmed. Refresh to check its status; uncertain sends are held instead of retried. A new inbound message is required after 24 hours.';
+    } finally {
+      if (mounted) setState(() => sendingDraft = null);
+    }
+    if (!mounted || account != widget.account) return;
+    await _load();
+    if (mounted && account == widget.account && notice != null) {
+      setState(() => failure = notice);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final Map<String, dynamic> capability = status?['capability'] is Map
@@ -234,7 +299,11 @@ class _InboxPanelState extends State<InboxPanel> {
             detail: capability.isEmpty
                 ? 'Loading account capability…'
                 : _text(capability['reason']),
-            badge: unread == 0 ? 'REVIEW ONLY' : '$unread UNREAD',
+            badge: unread == 0
+                ? (status?['outbound_messaging_enabled'] == true
+                      ? 'APPROVE TO SEND'
+                      : 'REVIEW ONLY')
+                : '$unread UNREAD',
             tone: unread == 0 ? Con.hold : Con.signal,
           ),
         ),
@@ -288,7 +357,13 @@ class _InboxPanelState extends State<InboxPanel> {
           ),
         ],
         const SizedBox(height: 20),
-        _DraftSummary(drafts: drafts),
+        _DraftSummary(
+          drafts: drafts,
+          onSend: status?['outbound_messaging_enabled'] == true
+              ? _sendDraft
+              : null,
+          sendingId: sendingDraft,
+        ),
         if (widget.onAutomations != null) ...<Widget>[
           const SizedBox(height: 10),
           ConButton(
@@ -822,8 +897,10 @@ InputDecoration _fieldDecoration(String hint) => InputDecoration(
 );
 
 class _DraftSummary extends StatelessWidget {
-  const _DraftSummary({required this.drafts});
+  const _DraftSummary({required this.drafts, this.onSend, this.sendingId});
   final List<Map<String, dynamic>> drafts;
+  final Future<void> Function(Map<String, dynamic>)? onSend;
+  final String? sendingId;
   @override
   Widget build(BuildContext context) => _Surface(
     stripe: drafts.isEmpty ? Con.ruleStrong : Con.wait,
@@ -848,7 +925,9 @@ class _DraftSummary extends StatelessWidget {
         Text(
           drafts.isEmpty
               ? 'No review-only DM drafts for this account.'
-              : 'Drafts are stored locally for human review. Outbound messaging remains disabled.',
+              : onSend == null
+              ? 'Drafts are stored locally for human review. Outbound messaging remains disabled.'
+              : 'Review the full reply before sending. Instagram requires an inbound message within the past 24 hours.',
           style: Ty.meta.copyWith(color: Con.ink2, height: 1.35),
         ),
         for (final Map<String, dynamic> row in drafts.take(3)) ...<Widget>[
@@ -859,6 +938,18 @@ class _DraftSummary extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: Ty.meta.copyWith(color: Con.ink),
           ),
+          Text(
+            _text(row['state']).replaceAll('_', ' '),
+            style: Ty.meta.copyWith(color: Con.ink2),
+          ),
+          if (onSend != null &&
+              <String>['draft', 'approved'].contains(_text(row['state'])))
+            ConButton(
+              label: sendingId == _text(row['id'])
+                  ? 'Sending…'
+                  : 'Review and send',
+              onPressed: sendingId != null ? null : () => onSend!(row),
+            ),
         ],
       ],
     ),

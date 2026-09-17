@@ -102,6 +102,75 @@ void main() {
     );
   });
 
+  testWidgets('DM sending requires explicit exact-text confirmation', (
+    WidgetTester tester,
+  ) async {
+    final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
+    bool completed = false;
+    Future<dynamic> get(String path) async {
+      if (path.contains('/status')) {
+        return <String, dynamic>{
+          ..._status,
+          'outbound_messaging_enabled': true,
+        };
+      }
+      if (path.contains('/threads')) return _threads;
+      return <String, dynamic>{
+        'drafts': <dynamic>[
+          <String, dynamic>{
+            'id': 'draft-1',
+            'account': '@zionboggan',
+            'conversation_id': 'signed-conversation-1',
+            'text': 'Exact approved reply',
+            'state': completed ? 'sent' : 'draft',
+          },
+        ],
+      };
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: studioTheme(),
+        home: Scaffold(
+          body: InboxPanel(
+            account: '@zionboggan',
+            getJson: get,
+            postJson: (String path, Map<String, dynamic> body) async {
+              expect(path, '/reels/dms/send');
+              sent.add(body);
+              completed = true;
+              return <String, dynamic>{'state': 'sent'};
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Review and send'));
+    await tester.tap(find.text('Review and send'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    expect(find.textContaining('From @zionboggan'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    await tester.tap(find.text('Review and send'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approve and send'));
+    await tester.pumpAndSettle();
+    expect(sent, <Map<String, dynamic>>[
+      <String, dynamic>{
+        'account': '@zionboggan',
+        'draft_id': 'draft-1',
+        'conversation_id': 'signed-conversation-1',
+        'text': 'Exact approved reply',
+        'confirm': true,
+      },
+    ]);
+    expect(find.text('Review and send'), findsNothing);
+    expect(find.text('sent'), findsOneWidget);
+  });
+
   testWidgets('Automations does not invent enabled rules or work hours', (
     WidgetTester tester,
   ) async {
