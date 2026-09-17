@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:app_links/app_links.dart';
 import 'package:video_player/video_player.dart';
+import 'agency_workspace.dart';
 import 'app_experience.dart';
 import 'console_shell.dart';
 import 'flyer_composer_page.dart';
@@ -3315,6 +3316,15 @@ class _NativeHomeState extends State<NativeHome>
                   ),
                 ),
             ], columns),
+            // Renders its own group heading, and nothing at all when the
+            // gateway has no agency surface.
+            AgencyWorkspaceCard(
+              key: ValueKey<String>('agency-$host-$scope-$_sessionEpoch'),
+              account: scope == 'all' ? '' : scope,
+              getJson: (String path) => TrialApi(host).getJson(path),
+              postJson: (String path, Map<String, dynamic> body) =>
+                  TrialApi(host).postJson(path, body),
+            ),
             const _GroupLabel('PUBLISHING'),
             ConProse(
               child: Padding(
