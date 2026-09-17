@@ -8,11 +8,11 @@ permissions:
 jobs:
   capture:
     runs-on: macos-26
-    timeout-minutes: 35
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        device: [iphone, ipad]
+        device: [iphone]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
@@ -56,9 +56,13 @@ jobs:
           print('Capturing actual simulator:',chosen['name'])
           PY
       - run: flutter pub get
-      - name: Capture actual app screens with live reviewer login
+      - name: Build capture app
+        timeout-minutes: 8
         run: |
-          flutter drive --driver=test_driver/app_store_capture.dart --target=integration_test/app_store_capture_test.dart -d "$CAPTURE_DEVICE" --dart-define-from-file="$RUNNER_TEMP/review-config.json"
+          flutter build ios --simulator --debug --target=integration_test/app_store_capture_test.dart --dart-define-from-file="$RUNNER_TEMP/review-config.json"
+      - name: Install launch and capture actual app screens
+        timeout-minutes: 7
+        run: python3 test_driver/capture_ios.py
       - name: Upload screenshots only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
