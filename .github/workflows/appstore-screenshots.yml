@@ -9,6 +9,10 @@ jobs:
   capture:
     runs-on: macos-26
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
@@ -31,17 +35,20 @@ jobs:
           path=Path(os.environ['RUNNER_TEMP'])/'review-config.json'
           path.write_text(raw);path.chmod(0o600)
           PY
-      - name: Select and boot iPhone simulator
+      - name: Select and boot required simulator
+        env:
+          CAPTURE_FAMILY: ${{ matrix.device }}
         run: |
           python3 - <<'PY'
           import json,subprocess,os
           data=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))
           devices=[d for values in data['devices'].values() for d in values if d.get('isAvailable')]
           chosen=None
-          for name in ('iPhone 16 Pro Max','iPhone 17 Pro Max','iPhone 16 Plus'):
+          names=('iPhone 16 Pro Max','iPhone 17 Pro Max','iPhone 16 Plus') if os.environ['CAPTURE_FAMILY']=='iphone' else ('iPad Pro 13-inch (M5)','iPad Pro 13-inch (M4)','iPad Air 13-inch (M3)')
+          for name in names:
               chosen=next((d for d in devices if d['name']==name),None)
               if chosen:break
-          if chosen is None:raise SystemExit('No supported large iPhone simulator available')
+          if chosen is None:raise SystemExit('No supported simulator available: '+str([d['name'] for d in devices]))
           if chosen['state']!='Booted':subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True)
           subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True)
           subprocess.run(['xcrun','simctl','status_bar',chosen['udid'],'override','--time','9:41','--batteryState','charged','--batteryLevel','100'],check=True)
@@ -56,7 +63,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: app-store-iphone-screenshots
+          name: app-store-${{ matrix.device }}-screenshots
           path: app-store-captures/*.png
           if-no-files-found: warn
           retention-days: 7

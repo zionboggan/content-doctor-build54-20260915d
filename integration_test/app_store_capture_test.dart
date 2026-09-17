@@ -1,9 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:iris/main.dart' as app;
 import 'package:iris/console_shell.dart';
-import 'package:iris/trial_credentials.dart';
+import 'package:iris/app_experience.dart' show tutorialSeenKey;
 
 void main() {
   final IntegrationTestWidgetsFlutterBinding binding =
@@ -18,9 +19,25 @@ void main() {
       throw StateError('Private review configuration is missing');
     }
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString(app.hostPrefKey, gateway);
-    await TrialCredentials.login(gateway, username, password);
+    await prefs.remove(app.hostPrefKey);
+    await prefs.setBool(tutorialSeenKey, true);
     app.main();
+    for (int i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 500));
+      if (find.text('Session locked').evaluate().isNotEmpty) break;
+    }
+    await tester.tap(find.text('Unlock').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose connection'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('App Review workspace'));
+    await tester.pumpAndSettle();
+    expect(prefs.getString(app.hostPrefKey), gateway);
+    await tester.tap(find.text('Unlock').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(CupertinoTextField).at(0), username);
+    await tester.enterText(find.byType(CupertinoTextField).at(1), password);
+    await tester.tap(find.text('Unlock').last);
     // Let real network requests finish; never replace them with fixture data.
     for (int i = 0; i < 40; i++) {
       await tester.pump(const Duration(milliseconds: 500));
@@ -34,6 +51,10 @@ void main() {
       }
     }
     expect(find.byType(ConTabBar), findsOneWidget);
+    expect(
+      find.textContaining(RegExp('arizona', caseSensitive: false)),
+      findsWidgets,
+    );
     expect(
       tester.widget<ConTabBar>(find.byType(ConTabBar)).inert,
       isFalse,
