@@ -181,10 +181,32 @@ Future<void> _boot(WidgetTester tester) async {
         const MethodChannel('trial_reels/credentials'),
         (MethodCall call) async => call.method == 'read' ? 'test-token' : null,
       );
+  // AppLinks (OAuth deep links): mock native channels for widget tests.
+  // messages is a MethodChannel (getInitialLink -> null);
+  // events is an EventChannel (uriLinkStream never emits).
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+        const MethodChannel('com.llfbandit.app_links/messages'),
+        (MethodCall call) async => null,
+      );
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockStreamHandler(
+        const EventChannel('com.llfbandit.app_links/events'),
+        MockStreamHandler.inline(
+          onListen: (Object? arguments, MockStreamHandlerEventSink events) {},
+        ),
+      );
   addTearDown(
     () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('trial_reels/credentials'),
+          null,
+        ),
+  );
+  addTearDown(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('com.llfbandit.app_links/messages'),
           null,
         ),
   );
